@@ -1,9 +1,41 @@
 const knex = require('knex');
 const fs = require('fs');
 const path = require('path');
+const Promise = require('bluebird');
+const streamPromises = require('stream/promises');
+const ALGORITHM = 'aes-256-cbc';
+const BufferWritableStream = require('./buffer-write');
+const {
+  createDecipheriv,
+  pbkdf2Sync
+} = require("crypto");
 require('dotenv').config();
+const $key = Symbol("key");
+const $salt = Symbol("salt");
+
+class Rfc2898DeriveBytes {
+  constructor(key, salt) {
+    this[$key] = key;
+    this[$salt] = salt;
+  }
+
+  getBytes(byteCount) {
+    const salt = this[$salt];
+    const key = this[$key];
+    return pbkdf2Sync(key, salt, 1000, byteCount, "sha1");
+  }
+}
 
 const SOURCE_FOLDER = process.env.SOURCE_FOLDER_PATH;
+const IV_LENGTH = 16;
+const KEY_LENGTH = 32;
+const pdb = new Rfc2898DeriveBytes(
+  "MAKV2SPBNI99212",
+  Buffer.from([
+    0x49, 0x76, 0x61, 0x6e, 0x20, 0x4d, 0x65, 0x64, 0x76, 0x65, 0x64, 0x65, 0x76
+  ])
+);
+const FILE_ENCRYPTION_KEY = pdb.getBytes(KEY_LENGTH + IV_LENGTH);
 
 const db = knex({
   client: 'mssql',
@@ -32,12 +64,25 @@ async function saveAttachments(folderPath, attachmentType, attachments, sourceFo
   }
 
   for (const attachment of attachments) {
-    const sourceFilePath = path.join(sourceFolder, attachment.Path); // Full path of the source file
+    const sourceFilePath = path.join(sourceFolder, attachment.Path);
     const targetFilePath = path.join(typeFolderPath, `${attachment.FileName || `Attachment_${attachment.ID}`}`);
-
     try {
       if (fs.existsSync(sourceFilePath)) {
-        fs.copyFileSync(sourceFilePath, targetFilePath); // Copy file from source to target
+        const buffer = await decryptFile(sourceFilePath)
+
+        console.log({
+          buffer,
+          sourceFilePath
+        })
+        //await fs.rmSync(targetFilePath);
+        fs.writeFile(targetFilePath, buffer, (err) => {
+          if (err) {
+            console.error(`Failed to copy file: ${err.message}`, err);
+            return;
+          }
+          console.log(`File saved successfully to ${targetFilePath}`);
+        });
+
         console.log(`Copied: ${sourceFilePath} -> ${targetFilePath}`);
       } else {
         console.warn(`Source file does not exist: ${sourceFilePath}`);
@@ -59,186 +104,134 @@ async function fetchAttachmentsByEntity() {
     // Fetch all entities
     const entities = await db('LKEntityStucture').select('ID', 'Name');
 
-    for (const entity of entities) {
-      console.log(`Processing Entity: ${entity.Name}`);
+    // Process each entity in parallel with controlled concurrency
+    await Promise.map(
+      entities,
+      async (entity) => {
+        console.log(`Processing Entity: ${entity.Name}`);
+        // Fetch users associated with the entity
+        const users = await db('Users')
+          .select('ID')
+          .where('EntityID', entity.ID);
 
-      // Create folder for the entity
-      const entityFolderPath = await createFolderStructure(BASE_DIR, entity.Name);
+        if (users.length === 0) return;
 
-      // Fetch users associated with the entity
-      const users = await db('Users')
-        .select('ID')
-        .where('EntityID', entity.ID);
+        const userIds = users.map((user) => user.ID);
 
-      if (users.length === 0) continue;
+        const correspondences = await db('Correspondences')
+          .select('ID', 'Subject', 'CreatorUserID')
+          .whereIn('CreatorUserID', userIds);
 
-      const userIds = users.map((user) => user.ID);
+        let entityFolderPath = null
 
-      // Fetch Correspondences and create folders for each
-      const correspondences = await db('Correspondences')
-        .select('ID', 'Subject', 'CreatorUserID')
-        .whereIn('CreatorUserID', userIds);
+        if (correspondences.length > 0) {
+          entityFolderPath = await createFolderStructure(BASE_DIR, entity.Name);
 
-      for (const correspondence of correspondences) {
 
-        // Fetch and save Correspondence Attachments
-        const correspondenceAttachments = await db('CorrespondenceAttachmentLookup')
-          .join('Attachments', 'CorrespondenceAttachmentLookup.AttachmentID', 'Attachments.ID')
-          .select('Attachments.*')
-          .where('CorrespondenceAttachmentLookup.CorrespondenceID', correspondence.ID);
+          await Promise.map(
+            correspondences,
+            async (correspondence) => {
+              const correspondenceAttachmentsPromise = db('CorrespondenceAttachmentLookup')
+                .join('Attachments', 'CorrespondenceAttachmentLookup.AttachmentID', 'Attachments.ID')
+                .select('Attachments.*')
+                .where('CorrespondenceAttachmentLookup.CorrespondenceID', correspondence.ID);
 
-        // Fetch and save Task Attachments related to this Correspondence
-        const taskAttachments = await db('Tasks')
-          .join('TaskAttachmentLookup', 'Tasks.ID', 'TaskAttachmentLookup.TaskID')
-          .join('Attachments', 'TaskAttachmentLookup.AttachmentID', 'Attachments.ID')
-          .select('Attachments.*')
-          .where('Tasks.CorrespondenceID', correspondence.ID);
+              const taskAttachmentsPromise = db('Tasks')
+                .join('TaskAttachmentLookup', 'Tasks.ID', 'TaskAttachmentLookup.TaskID')
+                .join('Attachments', 'TaskAttachmentLookup.AttachmentID', 'Attachments.ID')
+                .select('Attachments.*')
+                .where('Tasks.CorrespondenceID', correspondence.ID);
 
-        if (correspondenceAttachments.length > 0 || taskAttachments.length > 0) {
-          const correspondenceFolderPath = await createFolderStructure(entityFolderPath, correspondence.Subject || `Correspondence_${correspondence.ID}`);
-          await saveAttachments(correspondenceFolderPath, 'CorrespondenceAttachments', correspondenceAttachments, SOURCE_FOLDER);
-          await saveAttachments(correspondenceFolderPath, 'TaskAttachments', taskAttachments, SOURCE_FOLDER);
+              const commentAttachmentsPromise = db('CorrespondenceComments')
+                .join('CommentsAttachmentLookup', 'CorrespondenceComments.ID', 'CommentsAttachmentLookup.CommentID')
+                .join('Attachments', 'CommentsAttachmentLookup.AttachmentID', 'Attachments.ID')
+                .select('Attachments.*')
+                .where('CorrespondenceComments.CorrespondenceID', correspondence.ID);
+
+                const historyAttachmentsPromise = db('Tasks')
+                .join('TaskHistoryAssignment', 'Tasks.ID', 'TaskHistoryAssignment.TaskId')
+                .join('TaskHistory', 'TaskHistoryAssignment.TaskHistoryId', 'TaskHistory.ID')
+                .join('TaskHistoryAttachment', 'TaskHistory.ID', 'TaskHistoryAttachment.TaskHistoryId')
+                .join('Attachments', 'TaskHistoryAttachment.AttachmentId', 'Attachments.ID')
+                .select('Attachments.*')
+                .where('Tasks.CorrespondenceID', correspondence.ID);
+
+
+              const [correspondenceAttachments, taskAttachments, comments, TaskHistory] = await Promise.all([
+                correspondenceAttachmentsPromise,
+                taskAttachmentsPromise,
+                commentAttachmentsPromise,
+                historyAttachmentsPromise
+              ]);
+
+              if (correspondenceAttachments.length > 0 || taskAttachments.length > 0 || comments.length > 0 ||TaskHistory.length > 0) {
+                const correspondenceFolderPath = await createFolderStructure(
+                  entityFolderPath,
+                  correspondence.Subject || `Correspondence_${correspondence.ID}`
+                );
+
+                await Promise.all([
+                  saveAttachments(
+                    correspondenceFolderPath,
+                    '',
+                    [...correspondenceAttachments, ...taskAttachments, ...comments, ...TaskHistory],
+                    SOURCE_FOLDER
+                  )
+                ]);
+              }
+
+              console.log(`Processed Correspondence: ${correspondence.Subject || correspondence.ID}`);
+            },
+            { concurrency: 5 }
+          );
         }
 
-        console.log(`Processed Correspondence: ${correspondence.Subject || correspondence.ID}`);
-      }
-
-      console.log(`Entity "${entity.Name}" processed.`);
-    }
-
-    console.log('All entities processed successfully.');
-  } catch (error) {
-    console.error('Error fetching attachments:', error);
-  } finally {
-    await db.destroy(); // Close database connection
-  }
-}
-
-// Execute the script
-fetchAttachmentsByEntity();
-
-
-
-/**
- * 
- * 
-// Replace with your actual decryption key and algorithm
-const DECRYPTION_KEY = Buffer.from('your-secret-key', 'hex'); // Replace with your encryption key
-const DECRYPTION_ALGORITHM = 'aes-256-cbc'; // Replace with your encryption algorithm
-const IV = Buffer.from('your-initialization-vector', 'hex'); // Replace with your IV
-
-const BASE_DIR = path.join(__dirname, 'EntityAttachments');
-
-async function createFolderStructure(basePath, entityName) {
-  const entityPath = path.join(basePath, entityName);
-  if (!fs.existsSync(entityPath)) {
-    fs.mkdirSync(entityPath, { recursive: true });
-  }
-  return entityPath;
-}
-
-function decryptFile(sourcePath, destinationPath) {
-  try {
-    const decipher = crypto.createDecipheriv(DECRYPTION_ALGORITHM, DECRYPTION_KEY, IV);
-    const input = fs.createReadStream(sourcePath);
-    const output = fs.createWriteStream(destinationPath);
-
-    input.pipe(decipher).pipe(output);
-
-    return new Promise((resolve, reject) => {
-      output.on('finish', resolve);
-      output.on('error', reject);
-    });
-  } catch (error) {
-    console.error(`Failed to decrypt file: ${sourcePath}`, error.message);
-  }
-}
-
-async function saveAttachments(folderPath, attachmentType, attachments) {
-  const typeFolderPath = path.join(folderPath, attachmentType);
-  if (!fs.existsSync(typeFolderPath)) {
-    fs.mkdirSync(typeFolderPath);
-  }
-
-  for (const attachment of attachments) {
-    const sourcePath = attachment.SecuredPath;
-    const destinationPath = path.join(typeFolderPath, attachment.FileName || `Attachment_${attachment.ID}`);
-    await decryptFile(sourcePath, destinationPath);
-  }
-}
-
-async function fetchAttachmentsByEntity() {
-  try {
-    // Ensure base directory exists
-    if (!fs.existsSync(BASE_DIR)) {
-      fs.mkdirSync(BASE_DIR, { recursive: true });
-    }
-
-    // Fetch all entities
-    const entities = await db('LKEntityStucture').select('ID', 'Name');
-
-    for (const entity of entities) {
-      console.log(`Processing Entity: ${entity.Name}`);
-
-      // Create folder for the entity
-      const entityFolderPath = await createFolderStructure(BASE_DIR, entity.Name);
-
-      // Fetch users associated with the entity
-      const users = await db('Users')
-        .select('ID')
-        .where('EntityID', entity.ID);
-
-      if (users.length === 0) continue;
-
-      const userIds = users.map((user) => user.ID);
-
-      // Fetch Correspondence Attachments
-      const correspondenceAttachments = await db('Correspondences')
-        .join('CorrespondenceAttachmentLookup', 'Correspondences.ID', 'CorrespondenceAttachmentLookup.CorrespondenceID')
-        .join('Attachments', 'CorrespondenceAttachmentLookup.AttachmentID', 'Attachments.ID')
-        .select('Attachments.*')
-        .whereIn('Correspondences.CreatorUserID', userIds);
-
-      await saveAttachments(entityFolderPath, 'CorrespondenceAttachments', correspondenceAttachments);
-
-      // Fetch Task Attachments
-      const taskAttachments = await db('Tasks')
-        .join('TaskAttachmentLookup', 'Tasks.ID', 'TaskAttachmentLookup.TaskID')
-        .join('Attachments', 'TaskAttachmentLookup.AttachmentID', 'Attachments.ID')
-        .select('Attachments.*')
-        .whereIn('Tasks.CreatorUserID', userIds);
-
-      await saveAttachments(entityFolderPath, 'TaskAttachments', taskAttachments);
-
-      // Fetch Comment Attachments
-      const commentAttachments = await db('CorrespondenceComments')
-        .join('CommentsAttachmentLookup', 'CorrespondenceComments.ID', 'CommentsAttachmentLookup.CommentID')
-        .join('Attachments', 'CommentsAttachmentLookup.AttachmentID', 'Attachments.ID')
-        .select('Attachments.*')
-        .whereIn('CorrespondenceComments.UserID', userIds);
-
-      await saveAttachments(entityFolderPath, 'CommentAttachments', commentAttachments);
-
-      // Fetch Task History Attachments
-      const taskHistoryAttachments = await db('TaskHistoryAttachment')
-        .join('Attachments', 'TaskHistoryAttachment.AttachmentId', 'Attachments.ID')
-        .join('Tasks', 'TaskHistoryAttachment.TaskHistoryId', 'Tasks.ID')
-        .select('Attachments.*')
-        .whereIn('Tasks.CreatorUserID', userIds);
-
-      await saveAttachments(entityFolderPath, 'TaskHistoryAttachments', taskHistoryAttachments);
-
-      console.log(`Entity "${entity.Name}" processed.`);
-    }
+        console.log(`Entity "${entity.Name}" processed.`);
+      },
+      { concurrency: 3 }
+    );
 
     console.log('All entities processed successfully.');
   } catch (error) {
     console.error('Error fetching attachments:', error);
   } finally {
-    await db.destroy(); // Close database connection
+    await db.destroy();
   }
 }
 
-// Execute the script
+
+async function decryptFile(fileAbsolutePath) {
+  const { decipher, readStream } = decryptFileByAbsolutePath(fileAbsolutePath);
+  const bufferStream = new BufferWritableStream();
+
+  await streamPromises.pipeline(readStream, decipher, bufferStream);
+  console.debug(`File ${fileAbsolutePath} decrypted successfully`);
+  return bufferStream.getBuffer();
+}
+
+function getFileDecipher() {
+  const key = FILE_ENCRYPTION_KEY.subarray(0, KEY_LENGTH);
+  const iv = FILE_ENCRYPTION_KEY.subarray(KEY_LENGTH, KEY_LENGTH + IV_LENGTH);
+  return createDecipheriv(ALGORITHM, key, iv);
+}
+
+function decryptFileByAbsolutePath(absolutePath) {
+  if (!fs.existsSync(absolutePath)) {
+    throw new Error(`File not found filePath --> ${absolutePath}`);
+  }
+
+  let decipher;
+  try {
+    decipher = getFileDecipher();
+  } catch (err) {
+    throw new Error(`Failed to create decipher: ${err.message}`);
+  }
+
+  const readStream = fs.createReadStream(absolutePath);
+  return {
+    readStream,
+    decipher
+  };
+}
+
 fetchAttachmentsByEntity();
- */
