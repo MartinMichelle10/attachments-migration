@@ -47,7 +47,7 @@ const db = knex({
     },
 });
 
-const BASE_DIR = path.join(__dirname, 'martin');
+const BASE_DIR = path.join(__dirname, 'all_attachments');
 
 async function createFolderStructure(basePath, folderName) {
     const folderPath = path.join(basePath, folderName);
