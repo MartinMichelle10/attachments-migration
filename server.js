@@ -47,6 +47,16 @@ const db = knex({
     },
 });
 
+console.log({
+    client: 'mssql',
+    connection: {
+        host: process.env.DB_HOST,
+        user: process.env.DB_USER,
+        password: process.env.DB_PASSWORD,
+        database: process.env.DB_DATABASE,
+    },
+})
+
 const BASE_DIR = path.join(__dirname, 'all_attachments');
 
 async function createFolderStructure(basePath, folderName) {
@@ -185,10 +195,27 @@ async function fetchAttachmentsByEntity() {
 
         const distinctCorrespondenceIds = Array.from(grouped.distinctCorrespondenceIds);
 
-        const entities = await db('Correspondences')
-            .select('Correspondences.ID', 'Correspondences.EntityId', 'Correspondences.Subject', 'LKEntityStucture.Name')
-            .join('LKEntityStucture', 'LKEntityStucture.ID', '=', 'Correspondences.EntityId')
-            .whereIn('Correspondences.ID', distinctCorrespondenceIds);
+        const chunkArray = (array, size) => {
+            const result = [];
+            for (let i = 0; i < array.length; i += size) {
+                result.push(array.slice(i, i + size));
+            }
+            return result;
+        };
+        
+        const chunkSize = 500; // Keeping under 2100 parameters to stay safe
+        const chunks = chunkArray(distinctCorrespondenceIds, chunkSize);
+        
+        let entities = [];
+        
+        for (const chunk of chunks) {
+            const chunkEntities = await db('Correspondences')
+                .select('Correspondences.ID', 'Correspondences.EntityId', 'Correspondences.Subject', 'LKEntityStucture.Name')
+                .join('LKEntityStucture', 'LKEntityStucture.ID', '=', 'Correspondences.EntityId')
+                .whereIn('Correspondences.ID', chunk);
+        
+            entities = entities.concat(chunkEntities);
+        }
 
         const entityMap = entities.reduce((map, item) => {
             if (!map[item.EntityId]) {
