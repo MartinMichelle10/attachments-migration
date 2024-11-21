@@ -232,7 +232,7 @@ async function fetchAttachmentsByEntity() {
             const MAX_LENGTH = 100;  // Or whatever the file system limit is
             let safeEntityName = entityName ;
             if (safeEntityName.length > MAX_LENGTH) {
-                safeEntityName = safeEntityName.substring(0, MAX_LENGTH) + '...';
+                safeEntityName = safeEntityName.substring(0, MAX_LENGTH) ;
             }
             const entityFolderPath = await createFolderStructure(BASE_DIR, safeEntityName);
             console.log({ entityFolderPath })
@@ -242,7 +242,7 @@ async function fetchAttachmentsByEntity() {
                     const correspondenceName = entities.find(e => Number(e.ID) === Number(correspondenceId))?.Subject;
                     let safeCorrespondenceName = correspondenceName || `Correspondence_${correspondenceId}`;
                     if (safeCorrespondenceName.length > MAX_LENGTH) {
-                        safeCorrespondenceName = safeCorrespondenceName.substring(0, MAX_LENGTH) + '...';
+                        safeCorrespondenceName = safeCorrespondenceName.substring(0, MAX_LENGTH) ;
                     }
 
                     const correspondenceFolderPath = await createFolderStructure(
