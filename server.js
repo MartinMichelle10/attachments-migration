@@ -202,18 +202,18 @@ async function fetchAttachmentsByEntity() {
             }
             return result;
         };
-        
+
         const chunkSize = 500; // Keeping under 2100 parameters to stay safe
         const chunks = chunkArray(distinctCorrespondenceIds, chunkSize);
-        
+
         let entities = [];
-        
+
         for (const chunk of chunks) {
             const chunkEntities = await db('Correspondences')
                 .select('Correspondences.ID', 'Correspondences.EntityId', 'Correspondences.Subject', 'LKEntityStucture.Name')
                 .join('LKEntityStucture', 'LKEntityStucture.ID', '=', 'Correspondences.EntityId')
                 .whereIn('Correspondences.ID', chunk);
-        
+
             entities = entities.concat(chunkEntities);
         }
 
@@ -234,11 +234,17 @@ async function fetchAttachmentsByEntity() {
             await Promise.map(entityMap[entityId], async (correspondenceId) => {
                 if (correspondences[correspondenceId]) {
                     const correspondence = correspondences[correspondenceId];
-                    const correspondenceName = entities.find(e => Number(e.ID) === Number(correspondenceId))?.Subject;
-                    console.log({ correspondenceName })
+                    const MAX_LENGTH = 255;  // Or whatever the file system limit is
+                    let safeCorrespondenceName = correspondenceName || `Correspondence_${correspondenceId}`;
+                    if (safeCorrespondenceName.length > MAX_LENGTH) {
+                        safeCorrespondenceName = safeCorrespondenceName.substring(0, MAX_LENGTH) + '...';
+                    }
+
+                    console.log({safeCorrespondenceName})
+
                     const correspondenceFolderPath = await createFolderStructure(
                         entityFolderPath,
-                        correspondenceName || `Correspondence_${correspondenceId}`
+                        safeCorrespondenceName
                     );
 
                     const attachmentIds = Array.from(correspondence);
