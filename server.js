@@ -229,7 +229,12 @@ async function fetchAttachmentsByEntity() {
 
         await Promise.map(Object.keys(entityMap), async (entityId) => {
             const entityName = entities.find(e => Number(e.EntityId) === Number(entityId)).Name;
-            const entityFolderPath = await createFolderStructure(BASE_DIR, entityName);
+            const MAX_LENGTH = 255;  // Or whatever the file system limit is
+            let safeEntityName = entityName ;
+            if (safeEntityName.length > MAX_LENGTH) {
+                safeEntityName = safeEntityName.substring(0, MAX_LENGTH) + '...';
+            }
+            const entityFolderPath = await createFolderStructure(BASE_DIR, safeEntityName);
             console.log({ entityFolderPath })
             await Promise.map(entityMap[entityId], async (correspondenceId) => {
                 if (correspondences[correspondenceId]) {
