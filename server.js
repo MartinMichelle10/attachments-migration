@@ -229,7 +229,7 @@ async function fetchAttachmentsByEntity() {
 
         await Promise.map(Object.keys(entityMap), async (entityId) => {
             const entityName = entities.find(e => Number(e.EntityId) === Number(entityId)).Name;
-            const MAX_LENGTH = 255;  // Or whatever the file system limit is
+            const MAX_LENGTH = 100;  // Or whatever the file system limit is
             let safeEntityName = entityName ;
             if (safeEntityName.length > MAX_LENGTH) {
                 safeEntityName = safeEntityName.substring(0, MAX_LENGTH) + '...';
@@ -240,7 +240,6 @@ async function fetchAttachmentsByEntity() {
                 if (correspondences[correspondenceId]) {
                     const correspondence = correspondences[correspondenceId];
                     const correspondenceName = entities.find(e => Number(e.ID) === Number(correspondenceId))?.Subject;
-                    const MAX_LENGTH = 255;  // Or whatever the file system limit is
                     let safeCorrespondenceName = correspondenceName || `Correspondence_${correspondenceId}`;
                     if (safeCorrespondenceName.length > MAX_LENGTH) {
                         safeCorrespondenceName = safeCorrespondenceName.substring(0, MAX_LENGTH) + '...';
