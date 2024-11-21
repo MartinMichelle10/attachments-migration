@@ -234,22 +234,22 @@ async function fetchAttachmentsByEntity() {
             await Promise.map(entityMap[entityId], async (correspondenceId) => {
                 if (correspondences[correspondenceId]) {
                     const correspondence = correspondences[correspondenceId];
+                    const correspondenceName = entities.find(e => Number(e.ID) === Number(correspondenceId))?.Subject;
                     const MAX_LENGTH = 255;  // Or whatever the file system limit is
                     let safeCorrespondenceName = correspondenceName || `Correspondence_${correspondenceId}`;
                     if (safeCorrespondenceName.length > MAX_LENGTH) {
                         safeCorrespondenceName = safeCorrespondenceName.substring(0, MAX_LENGTH) + '...';
                     }
 
-                    console.log({safeCorrespondenceName})
-
                     const correspondenceFolderPath = await createFolderStructure(
                         entityFolderPath,
                         safeCorrespondenceName
                     );
 
+
                     const attachmentIds = Array.from(correspondence);
                     const allAttachments = attachments.filter(attachment => attachmentIds.includes(attachment.ID));
-                    console.log({ attLength: allAttachments.length })
+                    console.log({ safeCorrespondenceName, attLength: allAttachments.length })
                     await saveAttachments(
                         correspondenceFolderPath,
                         '',
