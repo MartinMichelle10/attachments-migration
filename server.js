@@ -154,29 +154,45 @@ async function fetchAttachmentsByEntity() {
             { concurrency: 5 } // Adjust concurrency based on performance
         );
 
-        const newResult = result.reduce((acc, item) => {
-            const { attachmentId } = item;
+        const { knownAttachments, unknownAttachments } = result.reduce(
+            (acc, item) => {
+                const { attachmentId } = item;
+                let isKnown = false;
+        
+                if (item.taskLink) {
+                    acc.knownAttachments.push({ attachmentId, correspondenceId: item.taskLink.CorrespondenceID });
+                    isKnown = true;
+                }
+        
+                if (item.commentLink) {
+                    acc.knownAttachments.push({ attachmentId, correspondenceId: item.commentLink.CorrespondenceID });
+                    isKnown = true;
+                }
+        
+                if (item.historyLink) {
+                    acc.knownAttachments.push({ attachmentId, correspondenceId: item.historyLink.CorrespondenceID });
+                    isKnown = true;
+                }
+        
+                if (item.correspondenceLink) {
+                    acc.knownAttachments.push({ attachmentId, correspondenceId: item.correspondenceLink.CorrespondenceID });
+                    isKnown = true;
+                }
+        
+                if (!isKnown) {
+                    acc.unknownAttachments.push({ attachmentId });
+                }
+        
+                return acc;
+            },
+            { knownAttachments: [], unknownAttachments: [] }
+        );
+        
+        console.log('Known Attachments:', knownAttachments.length);
+        console.log('Unknown Attachments:', unknownAttachments.length);
+        
 
-            if (item.taskLink) {
-                acc.push({ attachmentId, correspondenceId: item.taskLink.CorrespondenceID });
-            }
-
-            if (item.commentLink) {
-                acc.push({ attachmentId, correspondenceId: item.commentLink.CorrespondenceID });
-            }
-
-            if (item.historyLink) {
-                acc.push({ attachmentId, correspondenceId: item.historyLink.CorrespondenceID });
-            }
-
-            if (item.correspondenceLink) {
-                acc.push({ attachmentId, CorrespondenceId: item.correspondenceLink.CorrespondenceID });
-            }
-
-            return acc;
-        }, []);
-
-        const grouped = newResult.reduce((acc, item) => {
+        const grouped = knownAttachments.reduce((acc, item) => {
             const correspondenceId = item.correspondenceId; // Assuming correspondenceId is consistent
             if (!correspondenceId) return acc; // Skip items with no correspondenceId
 
