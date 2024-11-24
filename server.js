@@ -239,40 +239,40 @@ async function fetchAttachmentsByEntity() {
 
         const correspondences = grouped.grouped;
 
-        await Promise.map(Object.keys(entityMap), async (entityId) => {
-            const entityName = entities.find(e => Number(e.EntityId) === Number(entityId)).Name;
-            const MAX_LENGTH = 100;  // Or whatever the file system limit is
-            let safeEntityName = entityName;
-            if (safeEntityName.length > MAX_LENGTH) {
-                safeEntityName = safeEntityName.substring(0, MAX_LENGTH);
-            }
-            const entityFolderPath = await createFolderStructure(BASE_DIR, safeEntityName);
-            await Promise.map(entityMap[entityId], async (correspondenceId) => {
-                if (correspondences[correspondenceId]) {
-                    const correspondence = correspondences[correspondenceId];
-                    const correspondenceName = entities.find(e => Number(e.ID) === Number(correspondenceId))?.Subject;
-                    let safeCorrespondenceName = correspondenceName || `Correspondence_${correspondenceId}`;
-                    if (safeCorrespondenceName.length > MAX_LENGTH) {
-                        safeCorrespondenceName = safeCorrespondenceName.substring(0, MAX_LENGTH);
-                    }
+        // await Promise.map(Object.keys(entityMap), async (entityId) => {
+        //     const entityName = entities.find(e => Number(e.EntityId) === Number(entityId)).Name;
+        //     const MAX_LENGTH = 100;  // Or whatever the file system limit is
+        //     let safeEntityName = entityName;
+        //     if (safeEntityName.length > MAX_LENGTH) {
+        //         safeEntityName = safeEntityName.substring(0, MAX_LENGTH);
+        //     }
+        //     const entityFolderPath = await createFolderStructure(BASE_DIR, safeEntityName);
+        //     await Promise.map(entityMap[entityId], async (correspondenceId) => {
+        //         if (correspondences[correspondenceId]) {
+        //             const correspondence = correspondences[correspondenceId];
+        //             const correspondenceName = entities.find(e => Number(e.ID) === Number(correspondenceId))?.Subject;
+        //             let safeCorrespondenceName = correspondenceName || `Correspondence_${correspondenceId}`;
+        //             if (safeCorrespondenceName.length > MAX_LENGTH) {
+        //                 safeCorrespondenceName = safeCorrespondenceName.substring(0, MAX_LENGTH);
+        //             }
 
-                    const correspondenceFolderPath = await createFolderStructure(
-                        entityFolderPath,
-                        safeCorrespondenceName
-                    );
+        //             const correspondenceFolderPath = await createFolderStructure(
+        //                 entityFolderPath,
+        //                 safeCorrespondenceName
+        //             );
 
 
-                    const attachmentIds = Array.from(correspondence);
-                    const allAttachments = attachments.filter(attachment => attachmentIds.includes(attachment.ID));
-                    await saveAttachments(
-                        correspondenceFolderPath,
-                        '',
-                        allAttachments,
-                        SOURCE_FOLDER
-                    );
-                }
-            });
-        });
+        //             const attachmentIds = Array.from(correspondence);
+        //             const allAttachments = attachments.filter(attachment => attachmentIds.includes(attachment.ID));
+        //             await saveAttachments(
+        //                 correspondenceFolderPath,
+        //                 '',
+        //                 allAttachments,
+        //                 SOURCE_FOLDER
+        //             );
+        //         }
+        //     });
+        // });
 
         const unknownFolderPath = await createFolderStructure(
             BASE_DIR,
