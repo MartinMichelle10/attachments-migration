@@ -158,39 +158,39 @@ async function fetchAttachmentsByEntity() {
             (acc, item) => {
                 const { attachmentId } = item;
                 let isKnown = false;
-        
+
                 if (item.taskLink) {
                     acc.knownAttachments.push({ attachmentId, correspondenceId: item.taskLink.CorrespondenceID });
                     isKnown = true;
                 }
-        
+
                 if (item.commentLink) {
                     acc.knownAttachments.push({ attachmentId, correspondenceId: item.commentLink.CorrespondenceID });
                     isKnown = true;
                 }
-        
+
                 if (item.historyLink) {
                     acc.knownAttachments.push({ attachmentId, correspondenceId: item.historyLink.CorrespondenceID });
                     isKnown = true;
                 }
-        
+
                 if (item.correspondenceLink) {
                     acc.knownAttachments.push({ attachmentId, correspondenceId: item.correspondenceLink.CorrespondenceID });
                     isKnown = true;
                 }
-        
+
                 if (!isKnown) {
                     acc.unknownAttachments.push({ attachmentId });
                 }
-        
+
                 return acc;
             },
             { knownAttachments: [], unknownAttachments: [] }
         );
-        
+
         console.log('Known Attachments:', knownAttachments.length);
         console.log('Unknown Attachments:', unknownAttachments.length);
-        
+
 
         const grouped = knownAttachments.reduce((acc, item) => {
             const correspondenceId = item.correspondenceId; // Assuming correspondenceId is consistent
@@ -246,9 +246,9 @@ async function fetchAttachmentsByEntity() {
         await Promise.map(Object.keys(entityMap), async (entityId) => {
             const entityName = entities.find(e => Number(e.EntityId) === Number(entityId)).Name;
             const MAX_LENGTH = 100;  // Or whatever the file system limit is
-            let safeEntityName = entityName ;
+            let safeEntityName = entityName;
             if (safeEntityName.length > MAX_LENGTH) {
-                safeEntityName = safeEntityName.substring(0, MAX_LENGTH) ;
+                safeEntityName = safeEntityName.substring(0, MAX_LENGTH);
             }
             const entityFolderPath = await createFolderStructure(BASE_DIR, safeEntityName);
             console.log({ entityFolderPath })
@@ -258,7 +258,7 @@ async function fetchAttachmentsByEntity() {
                     const correspondenceName = entities.find(e => Number(e.ID) === Number(correspondenceId))?.Subject;
                     let safeCorrespondenceName = correspondenceName || `Correspondence_${correspondenceId}`;
                     if (safeCorrespondenceName.length > MAX_LENGTH) {
-                        safeCorrespondenceName = safeCorrespondenceName.substring(0, MAX_LENGTH) ;
+                        safeCorrespondenceName = safeCorrespondenceName.substring(0, MAX_LENGTH);
                     }
 
                     const correspondenceFolderPath = await createFolderStructure(
@@ -279,7 +279,19 @@ async function fetchAttachmentsByEntity() {
             });
         });
 
-        
+        const unknownFolderPath = await createFolderStructure(
+            BASE_DIR,
+            'unknown'
+        );
+
+        await saveAttachments(
+            unknownFolderPath,
+            '',
+            unknownAttachments,
+            SOURCE_FOLDER
+        );
+
+
         console.log('All entities processed successfully.');
         return result;
 
