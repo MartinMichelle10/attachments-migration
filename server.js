@@ -269,7 +269,6 @@ async function fetchAttachmentsByEntity() {
 
                     const attachmentIds = Array.from(correspondence);
                     const allAttachments = attachments.filter(attachment => attachmentIds.includes(attachment.ID));
-                    console.log({ safeCorrespondenceName, attLength: allAttachments.length })
                     await saveAttachments(
                         correspondenceFolderPath,
                         '',
@@ -280,9 +279,10 @@ async function fetchAttachmentsByEntity() {
             });
         });
 
+        
+        console.log('All entities processed successfully.');
         return result;
 
-        console.log('All entities processed successfully.');
     } catch (error) {
         console.error('Error fetching attachments:', error);
     } finally {
