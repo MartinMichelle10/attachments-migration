@@ -68,6 +68,7 @@ async function createFolderStructure(basePath, folderName) {
 }
 
 async function saveAttachments(folderPath, attachmentType, attachments, sourceFolder) {
+    console.log("=================================================", folderPath)
     const typeFolderPath = path.join(folderPath, attachmentType);
     if (!fs.existsSync(typeFolderPath)) {
         fs.mkdirSync(typeFolderPath);
@@ -79,11 +80,6 @@ async function saveAttachments(folderPath, attachmentType, attachments, sourceFo
         try {
             if (fs.existsSync(sourceFilePath)) {
                 const buffer = await decryptFile(sourceFilePath)
-
-                console.log({
-                    buffer,
-                    sourceFilePath
-                })
                 //await fs.rmSync(targetFilePath);
                 fs.writeFile(targetFilePath, buffer, (err) => {
                     if (err) {
@@ -251,7 +247,6 @@ async function fetchAttachmentsByEntity() {
                 safeEntityName = safeEntityName.substring(0, MAX_LENGTH);
             }
             const entityFolderPath = await createFolderStructure(BASE_DIR, safeEntityName);
-            console.log({ entityFolderPath })
             await Promise.map(entityMap[entityId], async (correspondenceId) => {
                 if (correspondences[correspondenceId]) {
                     const correspondence = correspondences[correspondenceId];
@@ -281,7 +276,7 @@ async function fetchAttachmentsByEntity() {
 
         const unknownFolderPath = await createFolderStructure(
             BASE_DIR,
-            'unknown'
+            'unknown-attachments'
         );
 
         await saveAttachments(
