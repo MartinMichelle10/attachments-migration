@@ -68,7 +68,7 @@ async function createFolderStructure(basePath, folderName) {
 }
 
 async function saveAttachments(folderPath, attachmentType, attachments, sourceFolder) {
-    console.log("=================================================", folderPath)
+    const failedAttachments = [];
     const typeFolderPath = path.join(folderPath, attachmentType);
     if (!fs.existsSync(typeFolderPath)) {
         fs.mkdirSync(typeFolderPath);
@@ -76,7 +76,8 @@ async function saveAttachments(folderPath, attachmentType, attachments, sourceFo
 
     for (const attachment of attachments) {
         const sourceFilePath = path.join(sourceFolder, attachment.Path);
-        const targetFilePath = path.join(typeFolderPath, `${attachment.FileName || `Attachment_${attachment.ID}`}`);
+        const fileName = path.basename(sourceFilePath);
+        const targetFilePath = path.join(typeFolderPath, `${fileName || `Attachment_${attachment.ID}`}`);
         try {
             if (fs.existsSync(sourceFilePath)) {
                 const buffer = await decryptFile(sourceFilePath)
@@ -92,11 +93,15 @@ async function saveAttachments(folderPath, attachmentType, attachments, sourceFo
                 console.log(`Copied: ${sourceFilePath} -> ${targetFilePath}`);
             } else {
                 console.warn(`Source file does not exist: ${sourceFilePath}`);
+                failedAttachments.push(attachment);
             }
         } catch (error) {
             console.error(`Failed to copy file: ${sourceFilePath} -> ${targetFilePath}`, error);
+            failedAttachments.push(attachment);
         }
     }
+
+    return failedAttachments;
 }
 
 
@@ -176,7 +181,7 @@ async function fetchAttachmentsByEntity() {
                 }
 
                 if (!isKnown) {
-                    acc.unknownAttachments.push({ attachmentId });
+                    acc.unknownAttachments.push(attachmentId );
                 }
 
                 return acc;
@@ -186,6 +191,7 @@ async function fetchAttachmentsByEntity() {
 
         console.log('Known Attachments:', knownAttachments.length);
         console.log('Unknown Attachments:', unknownAttachments.length);
+        const failedAttachments =  [];
 
 
         const grouped = knownAttachments.reduce((acc, item) => {
@@ -239,55 +245,61 @@ async function fetchAttachmentsByEntity() {
 
         const correspondences = grouped.grouped;
 
-        // await Promise.map(Object.keys(entityMap), async (entityId) => {
-        //     const entityName = entities.find(e => Number(e.EntityId) === Number(entityId)).Name;
-        //     const MAX_LENGTH = 100;  // Or whatever the file system limit is
-        //     let safeEntityName = entityName;
-        //     if (safeEntityName.length > MAX_LENGTH) {
-        //         safeEntityName = safeEntityName.substring(0, MAX_LENGTH);
-        //     }
-        //     const entityFolderPath = await createFolderStructure(BASE_DIR, safeEntityName);
-        //     await Promise.map(entityMap[entityId], async (correspondenceId) => {
-        //         if (correspondences[correspondenceId]) {
-        //             const correspondence = correspondences[correspondenceId];
-        //             const correspondenceName = entities.find(e => Number(e.ID) === Number(correspondenceId))?.Subject;
-        //             let safeCorrespondenceName = correspondenceName || `Correspondence_${correspondenceId}`;
-        //             if (safeCorrespondenceName.length > MAX_LENGTH) {
-        //                 safeCorrespondenceName = safeCorrespondenceName.substring(0, MAX_LENGTH);
-        //             }
+        await Promise.map(Object.keys(entityMap), async (entityId) => {
+            const entityName = entities.find(e => Number(e.EntityId) === Number(entityId)).Name;
+            const MAX_LENGTH = 100;  // Or whatever the file system limit is
+            let safeEntityName = entityName;
+            if (safeEntityName.length > MAX_LENGTH) {
+                safeEntityName = safeEntityName.substring(0, MAX_LENGTH);
+            }
+            const entityFolderPath = await createFolderStructure(BASE_DIR, safeEntityName);
+            await Promise.map(entityMap[entityId], async (correspondenceId) => {
+                if (correspondences[correspondenceId]) {
+                    const correspondence = correspondences[correspondenceId];
+                    const correspondenceName = entities.find(e => Number(e.ID) === Number(correspondenceId))?.Subject;
+                    let safeCorrespondenceName = correspondenceName || `Correspondence_${correspondenceId}`;
+                    if (safeCorrespondenceName.length > MAX_LENGTH) {
+                        safeCorrespondenceName = safeCorrespondenceName.substring(0, MAX_LENGTH);
+                    }
 
-        //             const correspondenceFolderPath = await createFolderStructure(
-        //                 entityFolderPath,
-        //                 safeCorrespondenceName
-        //             );
+                    const correspondenceFolderPath = await createFolderStructure(
+                        entityFolderPath,
+                        safeCorrespondenceName
+                    );
 
 
-        //             const attachmentIds = Array.from(correspondence);
-        //             const allAttachments = attachments.filter(attachment => attachmentIds.includes(attachment.ID));
-        //             await saveAttachments(
-        //                 correspondenceFolderPath,
-        //                 '',
-        //                 allAttachments,
-        //                 SOURCE_FOLDER
-        //             );
-        //         }
-        //     });
-        // });
+                    const attachmentIds = Array.from(correspondence);
+                    const allAttachments = attachments.filter(attachment => attachmentIds.includes(attachment.ID));
+                   const updatedKnown = await saveAttachments(
+                        correspondenceFolderPath,
+                        '',
+                        allAttachments,
+                        SOURCE_FOLDER
+                    );
+                    failedAttachments.push(...updatedKnown);
+
+                }
+            });
+        });
 
         const unknownFolderPath = await createFolderStructure(
             BASE_DIR,
             'unknown-attachments'
         );
 
-        await saveAttachments(
+        console.log('Saving unknown attachments...', unknownAttachments);
+        const updatedUnKnown = await saveAttachments(
             unknownFolderPath,
             '',
-            unknownAttachments,
+            attachments.filter(attachment => unknownAttachments.includes(attachment.ID)),
             SOURCE_FOLDER
         );
 
+        failedAttachments.push(...updatedUnKnown);
+
 
         console.log('All entities processed successfully.');
+        console.log({failedAttachments})
         return result;
 
     } catch (error) {
