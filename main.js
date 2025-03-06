@@ -162,6 +162,8 @@ const EntityCodes = {
     149: { "entityTypeId": 7, "name": "وحدة الرقابة الاداريه والمالية", "hierarchyId": "/1/93/149", "code": "D8000" },
     150: { "entityTypeId": 8, "name": "قسم الرقابة المالية", "hierarchyId": "/1/93/149/150", "code": "D8000" },
     151: { "entityTypeId": 8, "name": "قسم الرقابة الادارية", "hierarchyId": "/1/93/149/151", "code": "D8000" },
+    158: { "entityTypeId": 23, "name": "رئيس قطاع الامانة العامة", "hierarchyId": "/1/23/158", "code": "D8000" },
+
 };
 
 const correspondenceMap = {
@@ -170,7 +172,7 @@ const correspondenceMap = {
     InternalCorrespodence: "المراسلات الداخلية"
 };
 
-const CHUNK_SIZE = 10;
+const CHUNK_SIZE = 100;
 let ALL_CORRESPONDENCES = [];
 let ALL_CORRESPONDENCESTITIES = [];
 const ALL_CORRESPONDENCES_WITH_FOLDERS = new Map();
@@ -241,6 +243,7 @@ async function getAllCorrespondences() {
             if (correspondences.length > 0) {
                 ALL_CORRESPONDENCES = ALL_CORRESPONDENCES.concat(correspondences);
                 offset += CHUNK_SIZE;
+                console.log('fetching .....')
                 hasMoreData = false;
             } else {
                 hasMoreData = false; // No more data left
@@ -260,21 +263,29 @@ async function getAllCorrespondences() {
 async function categorizeCorrespondence(correspondences) {
     const categorizedCorrespondences = new Map();
 
-    for (const corr of correspondences) {
-        const queryResult = await
-            db('Tasks as t')
-                .leftJoin('TaskAssignment as ta', 'ta.TaskID', 't.ID')
-                .leftJoin('Users as u_creator', 't.CreatorUserID', 'u_creator.ID')
-                .leftJoin('Users as u_assignee', 'ta.AssigneeUserID', 'u_assignee.ID')
-                .leftJoin('Correspondences as c', 't.CorrespondenceID', 'c.ID')
-                .select('u_assignee.EntityID as AssigneeEntityID')
-                .max('u_creator.EntityID as CreatorEntityID')
-                .select('ta.AssigneeEntityID')
-                .where('c.ID', corr.CorrespondenceID)
-                .groupBy('u_assignee.EntityID', 'ta.AssigneeEntityID');
+    // Execute all queries in parallel
+    const queries = correspondences.map(corr =>
+        db('Tasks as t')
+            .leftJoin('TaskAssignment as ta', 'ta.TaskID', 't.ID')
+            .leftJoin('Users as u_creator', 't.CreatorUserID', 'u_creator.ID')
+            .leftJoin('Users as u_assignee', 'ta.AssigneeUserID', 'u_assignee.ID')
+            .leftJoin('Correspondences as c', 't.CorrespondenceID', 'c.ID')
+            .select('u_assignee.EntityID as AssigneeEntityID')
+            .max('u_creator.EntityID as CreatorEntityID')
+            .select('ta.AssigneeEntityID')
+            .where('c.ID', corr.CorrespondenceID)
+            .groupBy('u_assignee.EntityID', 'ta.AssigneeEntityID')
+            .then(queryResult => ({ corr, queryResult })) // Attach the correspondence to the result
+    );
 
+    // Wait for all database queries to complete
+    const results = await Promise.all(queries);
 
-
+    results.forEach(({ corr, queryResult }) => {
+      console.log({
+        queryResult,
+        id: corr.CorrespondenceID
+      })
         queryResult.forEach(row => {
             const entityId = Array.isArray(row.AssigneeEntityID)
                 ? row.AssigneeEntityID.find(item => item !== null)
@@ -285,20 +296,10 @@ async function categorizeCorrespondence(correspondences) {
             const assigneeKey = EntityCodes[Number(entityId)]?.code || null;
             const creatorKey = EntityCodes[Number(creatorEntityId)]?.code || null;
 
-
             if (assigneeKey) {
                 if (!categorizedCorrespondences.has(assigneeKey)) {
                     categorizedCorrespondences.set(assigneeKey, []);
                 }
-            }
-
-            if (creatorKey) {
-                if (!categorizedCorrespondences.has(creatorKey)) {
-                    categorizedCorrespondences.set(creatorKey, []);
-                }
-            }
-
-            if (assigneeKey) {
                 categorizedCorrespondences.get(assigneeKey).push({
                     correspondenceId: corr.CorrespondenceID,
                     creatorEntityId,
@@ -306,7 +307,11 @@ async function categorizeCorrespondence(correspondences) {
                     type: 'assignee'
                 });
             }
+
             if (creatorKey) {
+                if (!categorizedCorrespondences.has(creatorKey)) {
+                    categorizedCorrespondences.set(creatorKey, []);
+                }
                 categorizedCorrespondences.get(creatorKey).push({
                     correspondenceId: corr.CorrespondenceID,
                     creatorEntityId,
@@ -318,19 +323,22 @@ async function categorizeCorrespondence(correspondences) {
 
         if (queryResult.length === 0) {
             const entityId = corr.EntityId;
+            const entityKey = EntityCodes[Number(entityId)]?.code;
 
-            if (!categorizedCorrespondences.has(EntityCodes[Number(entityId)].code)) {
-                categorizedCorrespondences.set(EntityCodes[Number(entityId)].code, []);
+            if (entityKey) {
+                if (!categorizedCorrespondences.has(entityKey)) {
+                    categorizedCorrespondences.set(entityKey, []);
+                }
+                categorizedCorrespondences.get(entityKey).push({
+                    correspondenceId: corr.CorrespondenceID,
+                    creatorEntityId: corr.EntityId,
+                    assigneeEntityId: null
+                });
             }
-            categorizedCorrespondences.get(EntityCodes[Number(entityId)].code).push({
-                correspondenceId: corr.CorrespondenceID,
-                creatorEntityId: corr.EntityId,
-                assigneeEntityId: null
-            });
         }
-    }
-    const data = Object.fromEntries(categorizedCorrespondences);
+    });
 
+    const data = Object.fromEntries(categorizedCorrespondences);
     ALL_CORRESPONDENCESTITIES = data;
 }
 
@@ -375,6 +383,14 @@ async function validateCorrespondence() {
                 return;
             }
 
+            const creatorCode = EntityCodes[Number(item.creatorEntityId)]?.code || null;
+
+            if(creatorCode === null) { 
+                console.log(
+                    {item}
+                )
+            }
+
             const updatedCorrespondence = {
                 ...fullCorrespondence,
                 entityCode: key,
@@ -382,9 +398,9 @@ async function validateCorrespondence() {
                 creatorEntityId: item.creatorEntityId,
                 assigneeEntityId: item.assigneeEntityId,
                 creatorEntitycode: EntityCodes[Number(item.creatorEntityId)].code,
-                assigneeEntitycode: item.assigneeEntityId ? EntityCodes[Number(item.assigneeEntityId)].code : null,
+                assigneeEntitycode: item.assigneeEntityId ? EntityCodes[Number(item.assigneeEntityId)]?.code : null,
                 creatorEntityName: EntityCodes[Number(item.creatorEntityId)].name,
-                assigneeEntityName: item.assigneeEntityId ? EntityCodes[Number(item.assigneeEntityId)].name : null,
+                assigneeEntityName: item.assigneeEntityId ? EntityCodes[Number(item.assigneeEntityId)]?.name : null,
             };
 
             updatedEntries.push(updatedCorrespondence);
@@ -402,27 +418,27 @@ async function validateCorrespondence() {
 
 
 async function processCorrespondences() {
-    const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-    const rootFolder = `10-Batches-${date}`;
+    // const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    // const rootFolder = `10-Batches-${date}`;
 
-    await fs.mkdir(rootFolder, { recursive: true });
+    // await fs.mkdir(rootFolder, { recursive: true });
 
-    for (const [entityCode, correspondences] of ALL_CORRESPONDENCES_WITH_FOLDERS.entries()) {
-        for (const [index, correspondence] of correspondences.entries()) {
-            const fullCode = `${campmasCode}${entityCode}${correspondence.folderIndex}${correspondence.correspondenceNum}`;
-            const batchFolder = path.join(rootFolder, `BATCH-${entityCode}-${correspondence.correspondenceNum}`);
-            const docCatFolder = path.join(batchFolder, 'DOCCAT0057');
-            const folderP087 = path.join(docCatFolder, 'P087');
-            const folderCapmas = path.join(folderP087, campmasCode);
-            const folderEntity = path.join(folderCapmas, entityCode);
-            const folderCorrespondence = path.join(folderEntity, fullCode);
+    // for (const [entityCode, correspondences] of ALL_CORRESPONDENCES_WITH_FOLDERS.entries()) {
+    //     for (const [index, correspondence] of correspondences.entries()) {
+    //         const fullCode = `${campmasCode}${entityCode}${correspondence.folderIndex}${correspondence.correspondenceNum}`;
+    //         const batchFolder = path.join(rootFolder, `BATCH-${entityCode}-${correspondence.correspondenceNum}`);
+    //         const docCatFolder = path.join(batchFolder, 'DOCCAT0057');
+    //         const folderP087 = path.join(docCatFolder, 'P087');
+    //         const folderCapmas = path.join(folderP087, campmasCode);
+    //         const folderEntity = path.join(folderCapmas, entityCode);
+    //         const folderCorrespondence = path.join(folderEntity, fullCode);
 
 
-            await fs.mkdir(folderCorrespondence, { recursive: true });
-            console.log(`Created folder: ${folderCorrespondence}`);
-            await generateXML(entityCode, correspondence, fullCode, docCatFolder);
-        }
-    }
+    //         await fs.mkdir(folderCorrespondence, { recursive: true });
+    //         console.log(`Created folder: ${folderCorrespondence}`);
+    //         await generateXML(entityCode, correspondence, fullCode, docCatFolder);
+    //     }
+    // }
 }
 
 
